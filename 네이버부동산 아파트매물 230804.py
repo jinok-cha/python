@@ -1,0 +1,139 @@
+import requests
+#import time
+import pandas as pd
+import math
+from bs4 import BeautifulSoup
+import json
+import datetime
+import os
+#import openpyxl
+
+list_data = []
+
+keyword = input("조회할 지역을 입력하세요 : ")
+today = datetime.datetime.now()
+curr_date = today.strftime('%y%m%d')
+
+url = input("검색할 지역의 url을 입력하세요 : ")
+res = requests.get(url, headers={'user-agent': 'Mozilla/5.0'})
+res.raise_for_status()
+soup = str(BeautifulSoup(res.text, "lxml"))
+value = soup.split("filter: {")[1].split("}")[0].replace(" ", "").replace("'", "")
+lat = value.split("lat:")[1].split(",")[0]
+lon = value.split("lon:")[1].split(",")[0]
+z = value.split("z:")[1].split(",")[0]
+rletTpCds = value.split("rletTpCds:")[1].split(",")[0]
+tradTpCds = value.split("tradTpCds:")[1].split()[0]
+
+# lat - btm : 37.550985 - 37.4331698 = 0.1178152
+# top - lat : 37.6686142 - 37.550985 = 0.1176292
+lat_margin = 0.0025 #0.018
+# lon - lft : 126.849534 - 126.7389841 = 0.1105499
+# rgt - lon : 126.9600839 - 126.849534 = 0.1105499
+lon_margin = 0.0025 #0.111
+btm = float(lat) - lat_margin
+lft = float(lon) - lon_margin
+top = float(lat) + lat_margin
+rgt = float(lon) + lon_margin
+
+# clusterList?view 를 통한 그룹(단지)의 데이터를 가져온다.
+remaked_URL =f"https://m.land.naver.com/cluster/clusterList?view=atcl&rletTpCd={rletTpCds}&tradTpCd={tradTpCds}&z={z}&lat={lat}&lon={lon}&btm={btm}&lft={lft}&top={top}&rgt={rgt}&addon=COMPLEX&bAddon=COMPLEX&isOnlyIsale=false"
+res2 = requests.get(remaked_URL, headers={'user-agent': 'Mozilla/5.0'})
+json_str = json.loads(json.dumps(res2.json()))
+values = json_str['data']['ARTICLE']
+
+# 큰 원으로 구성되어 있는 전체 매물그룹(values)을 load 하여 한 그룹씩 세부 쿼리 진행
+for v in values[:50]:
+    lgeo = v['lgeo']
+    count = v['count']
+    z2 = v['z']
+    lat1 = v['lat']
+    lon1 = v['lon']
+    len_pages = count / 20 + 1
+
+    for idx in range(1, math.ceil(len_pages)):
+        remaked_URL2 = f"https://m.land.naver.com/cluster/ajax/articleList?itemId={lgeo}&mapKey=&lgeo={lgeo}&showR0=&rletTpCd={rletTpCds}&tradTpCd={tradTpCds}&z={z2}&lat={lat1}&lon={lon1}&totCnt={count}&page={idx}"
+        res3 = requests.get(remaked_URL2, headers={'user-agent': 'Mozilla/5.0'})
+        json_str1 = json.loads(json.dumps(res3.json()))
+        for i in range(len(json_str1['body'])):
+            print((idx-1)*20+i, count)
+            try:
+                atclNo = json_str1['body'][i]['atclNo']  # 물건번호
+            except:
+                atclNo = 0
+            try:
+                atclNm = json_str1['body'][i]['atclNm']  # 아파트명
+            except:
+                atclNm = 0
+            try:
+                bildNm = json_str1['body'][i]['bildNm']  # 동
+            except:
+                bildNm = 0
+            try:
+                tradTpNm = json_str1['body'][i]['tradTpNm']  # 매매/전세/월세 구분
+            except:
+                tradTpNm = 0
+            try:
+                prc = json_str1['body'][i]['prc']  # 가격
+            except:
+                prc = 0
+            try:
+                spc1 = round(float(json_str1['body'][i]['spc1']) * 0.3025, 2)   # 계약면적(m2) -> 평으로 계산 : * 0.3025
+            except:
+                spc1 = 0
+            try:
+                spc2 = round(float(json_str1['body'][i]['spc2']) * 0.3025, 2)   # 전용면적(m2) -> 평으로 계산 : * 0.3025
+            except:
+                spc2 = 0
+            try:
+                hanPrc = json_str1['body'][i]['hanPrc'].replace(",","").replace("억 ", "").replace("억","0000")  # 보증금
+            except:
+                hanPrc = 0
+            try:
+                rentPrc = json_str1['body'][i]['rentPrc']  # 월세
+            except:
+                rentPrc = 0
+            try:
+                flrInfo = json_str1['body'][i]['flrInfo'].split("/")  # 층수(물건층/전체층)
+            except:
+                flrInfo = [0, 0]
+            try:
+                lat2 = json_str1['body'][i]['lat']  # 위도
+            except:
+                lat2 = 0
+            try:
+                lng2 = json_str1['body'][i]['lng']  # 경도
+            except:
+                lng2 = 0
+            try:
+                atclFetrDesc = str(json_str1['body'][i]['atclFetrDesc']).replace("[", "").replace("]", "").replace("'", "")  # 기타 정보
+            except:
+                atclFetrDesc = 0
+            try:
+                rltrNm = json_str1['body'][i]['rltrNm']  # 부동산
+            except:
+                rltrNm = 0
+            try:
+                detaild_information = "https://m.land.naver.com/article/info/{}".format(atclNo)
+            except:
+                detaild_information = 0
+            try:
+                avg_hanPrc = round(float(hanPrc.replace(",", "").replace("억", "0000").replace("억 ", "")) / spc2, 1)
+            except:
+                avg_hanPrc = 0
+            try:
+                avg_rentPrc = round(rentPrc / spc2, 1)
+            except:
+                avg_rentPrc = 0
+            list_data.append([atclNo, atclNm, bildNm, tradTpNm, prc, spc1, spc2, int(hanPrc), rentPrc, avg_hanPrc, avg_rentPrc, flrInfo[0], flrInfo[1],
+               lat2, lng2, atclFetrDesc, rltrNm, detaild_information])
+            #time.sleep(2)
+        #time.sleep(5)
+columns = ['물건번호', '아파트명', '동', '거래방식', '매매가', '계약면적(평)', '전용면적(평)', '보증금', '월세', '평당보증금', '평당월세', '해당층수', '총층수', '위도', '경도', '기타정보', '부동산', '비고']
+real_df = pd.DataFrame(list_data, columns=columns).sort_values(by='평당월세', ascending=False)
+if not os.path.exists('./네이버부동산 아파트매물수집_' + curr_date + '.xlsx'):
+    with pd.ExcelWriter('./네이버부동산 아파트매물수집_' +curr_date + '.xlsx', mode='w', engine='openpyxl') as writer:
+        real_df.to_excel(writer, sheet_name=f"{keyword}")
+else:
+    with pd.ExcelWriter('./네이버부동산 아파트매물수집_' + curr_date + '.xlsx', mode='a', engine='openpyxl') as writer:
+        real_df.to_excel(writer, sheet_name=f"{keyword}")
